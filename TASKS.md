@@ -22,9 +22,11 @@ Architecture context: `PROJECT_PLAN.md` · Conventions: `AGENTS.md`.
 ## Phase 1 — Data layer & anonymous household auth
 
 **Supabase (schema `hearth`)**
-- [ ] Migration: `households`, `household_tokens`, `profiles`, `todos`, `freezer_items`, `push_subscriptions` + indexes + triggers (5-profile cap, title/name length CHECKs, FK cascade)
-- [ ] RLS on every table + token-gated policies (SECURITY DEFINER helper on `x-household-token`) + GRANTs (anon only)
-- [ ] Edge Function `household-create`: generates display_code (6-char base32), strong password, hashes it, inserts household + default profile + token
+- [x] Migration `0002_core_schema.sql`: `households`, `household_tokens`, `profiles`, `todos`, `freezer_items`, `device_subscriptions` + indexes (active-deadline partial, FIFO added_date, subscription profile, GIN tags) + triggers (5-profile cap advisory-locked, cross-household profile guard) + CHECKs (tags, completed⇔completed_at, display_code)
+- [x] RLS on every table + token-gated policies (`current_household_id()` SECURITY DEFINER helper on `x-household-token`) + GRANTs (anon only; `household_tokens` deny-all) — **verified 19/19 against a Postgres engine** (`supabase/scripts/smoke_test_rls.sql`)
+- [x] `DOCS_DB.md` — tables, relations, RLS enforcement, operations
+- [x] `supabase/seed.sql` — dev/demo seed (2 households, known tokens, cap-max profiles)
+- [ ] Edge Function `household-create`: generates display_code (6-char base32, alphabet `ABCDEFGHJKMNPQRSTVWXYZ23456789`), strong password, hashes it, inserts household + default profile + token
 - [ ] Edge Function `household-join`: verify code+password → issue token; rate-limit attempts
 - [ ] Dashboard: expose `hearth` schema (Project Settings → API → Exposed schemas)
 

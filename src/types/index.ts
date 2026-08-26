@@ -26,8 +26,9 @@ export interface TodoItem {
   /** ISO date (YYYY-MM-DD) or null when undated. */
   dueDate: string | null;
   tags: string[];
-  /** Set when the task is completed → archived. */
-  archivedAt: string | null;
+  /** Completion archives the task (completed=true). */
+  completed: boolean;
+  completedAt: string | null;
   createdAt: string;
 }
 
@@ -39,10 +40,11 @@ export interface FreezerItem {
   name: string;
   /** ISO date (YYYY-MM-DD), defaults to today. */
   addedDate: string;
-  quantity: number | null;
-  unit: string | null;
+  /** Free-form quantity/unit string, e.g. "2.5 kg", "1", "500 g". */
+  quantity: string | null;
   tags: string[];
-  /** Set when consumed → archived (FIFO history). */
+  /** Consuming archives the item (consumed=true). */
+  consumed: boolean;
   consumedAt: string | null;
 }
 

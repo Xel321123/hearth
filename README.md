@@ -59,6 +59,7 @@ npm run dev               # → http://localhost:5173
 
 ## Repository docs
 
+- [`DOCS_DB.md`](DOCS_DB.md) — database schema: tables, relations, RLS enforcement, indexes.
 - [`AGENTS.md`](AGENTS.md) — working conventions for humans and AI agents (secrets, Supabase schema rules, code style, definition of done).
 - [`PROJECT_PLAN.md`](PROJECT_PLAN.md) — full architectural breakdown: data model, auth flow, module design, security checklist.
 - [`TASKS.md`](TASKS.md) — the 4-phase execution roadmap with acceptance criteria.

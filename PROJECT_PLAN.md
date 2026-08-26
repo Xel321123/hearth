@@ -1,6 +1,7 @@
 # PROJECT_PLAN.md — Hearth architecture
 
-> Companion to [README.md](README.md) (what & why) and [TASKS.md](TASKS.md) (when & who).
+> Companion to [README.md](README.md) (what & why), [TASKS.md](TASKS.md) (when & who),
+> and [DOCS_DB.md](DOCS_DB.md) (database schema + RLS).
 > This document is the *how*: data model, auth, modules, push, security.
 
 ## 1. Vision & principles
@@ -30,7 +31,7 @@ household share with each other.
 ┌────────────────────────────── Supabase ────────────────────────┐   ┌──────────────────┐
 │ PostgreSQL — schema `hearth`, RLS everywhere  ◄──┐  Edge Fn     │   │  Browser Push    │
 │ households · household_tokens · profiles         │  push-notify ┼──►│  Service (Google/ │
-│ todos · freezer_items · push_subscriptions      └── (invoke)    │   │  Mozilla/Apple)   │
+│ todos · freezer_items · device_subscriptions    └── (invoke)    │   │  Mozilla/Apple)   │
 └─────────────────────────────────────────────────────────────────┘   └──────────────────┘
 ```
 
@@ -49,83 +50,35 @@ VAPID-signed Web Push → only that profile's devices show the notification.
 | Web Push + VAPID | Standards-based targeted notifications, no custom server needed |
 | localStorage | Persona + device id + session: tiny, offline-capable, no PII sent anywhere |
 
-## 4. Data model — schema `hearth`
+## 4. Data model — schema `hearth` (implemented in 0002_core_schema.sql)
 
 > Shared-instance rule: **never** the `public` schema. Client pins `db: { schema: "hearth" }`.
+> Full column-level reference, constraints and RLS matrix: **DOCS_DB.md**.
 
-**households**
-| column | notes |
-|---|---|
-| `id` uuid PK | internal id, `gen_random_uuid()` |
-| `display_code` text UNIQUE | human-friendly join code (e.g. 6-char base32) |
-| `password_hash` text NOT NULL | hashed via Edge Function (scrypt/argon2-style); **no reset** |
-| `created_at` timestamptz | |
+| table | role | key rules |
+|---|---|---|
+| `households` | anonymous household identity | uuid PK; `display_code` (6-char Crockford base32, no I/L/O/U/0/1); `password_hash` (server-side only); **no reset** |
+| `household_tokens` | hashed bearer tokens | `token_hash` (sha256 hex) PK; **deny-all** for anon; read only via SECURITY DEFINER helper |
+| `profiles` | named personas (not logins) | ≤ 5/household — advisory-locked trigger; name UNIQUE per household; 1–40 chars |
+| `todos` | tasks | title 1–200; `due_date`; assigned `profile_id` (same-household trigger); `tags text[]` (validated, ≤ 20, GIN-indexed); `completed` + `completed_at` consistency CHECK; completion = archive |
+| `freezer_items` | freezer inventory | `added_date` DEFAULT today (FIFO); `quantity` free-form string (`2.5 kg`); `consumed` + `consumed_at` CHECK; tags as todos |
+| `device_subscriptions` | push subscriptions | UNIQUE (household_id, profile_id, device_id); UNIQUE endpoint; `keys jsonb` {p256dh, auth}; same-household profile trigger |
 
-**household_tokens** — join tokens, stored hashed.
-| column | notes |
-|---|---|
-| `token_hash` text PK | hash of the access token the client holds |
-| `household_id` uuid FK → households (CASCADE) | |
-| `created_at` timestamptz | |
+**Cross-household integrity:** trigger `enforce_profile_household()` on
+todos/freezer_items/device_subscriptions rejects any `profile_id` from a
+different household — FKs alone can't express this.
 
-**profiles** — person profiles, *not* auth logins; max 5 per household (trigger-enforced).
-| column | notes |
-|---|---|
-| `id` uuid PK | |
-| `household_id` uuid FK → households (CASCADE) | |
-| `name` text NOT NULL | CHECK length 1..40 |
-| `created_at` timestamptz | |
-
-**todos**
-| column | notes |
-|---|---|
-| `id` uuid PK · `household_id` uuid FK (CASCADE) | |
-| `profile_id` uuid FK → profiles | assigned to |
-| `created_by` uuid FK → profiles | |
-| `title` text NOT NULL | CHECK 1..200 |
-| `due_date` date NULL | |
-| `tags` text[] DEFAULT '{}' | |
-| `archived_at` timestamptz NULL | completing = archive |
-| `created_at` timestamptz | |
-| index | `(household_id, archived_at, due_date)` |
-
-**freezer_items**
-| column | notes |
-|---|---|
-| `id` uuid PK · `household_id` uuid FK (CASCADE) | |
-| `profile_id` uuid FK NULL | who added it |
-| `name` text NOT NULL | CHECK 1..200 |
-| `added_date` date NOT NULL DEFAULT CURRENT_DATE | FIFO key |
-| `quantity` numeric(8,2) NULL · `unit` text NULL | optional weight/qty |
-| `tags` text[] DEFAULT '{}' | |
-| `consumed_at` timestamptz NULL | consuming = archive |
-| index | `(household_id, consumed_at NULLS FIRST, added_date)` |
-
-**push_subscriptions**
-| column | notes |
-|---|---|
-| `id` uuid PK · `household_id` uuid FK (CASCADE) | |
-| `profile_id` uuid FK → profiles | device's active persona at registration |
-| `device_id` text NOT NULL | stable UUID from localStorage |
-| `endpoint` text NOT NULL UNIQUE | Push service endpoint |
-| `keys` jsonb NOT NULL | `{ p256dh, auth }` |
-| `user_agent` text NULL | debug only |
-| `created_at` / `last_seen_at` timestamptz | |
-| UNIQUE | `(household_id, profile_id, device_id)` |
-
-**RLS strategy (zero-trust).** Every table:
-- `ALTER TABLE hearth.<t> ENABLE ROW LEVEL SECURITY`
-- policies via a SECURITY DEFINER helper `hearth.has_access(token) → household_id`
-  that looks up `household_tokens` — the client's token arrives in the
-  `x-household-token` request header (PostgREST exposes it via
-  `current_setting('request.headers', true)`), and all `WHERE household_id = ...`
-  clauses are derived from the token, never from client-supplied params.
-- `GRANT USAGE ON SCHEMA hearth TO anon` + table-level GRANTs limited to needed verbs (`anon` role only — no `auth.users` in this app).
+**RLS strategy (zero-trust).** Every table `ENABLE ROW LEVEL SECURITY`; explicit
+per-verb policies `TO anon` gated on `hearth.current_household_id()` — a SECURITY
+DEFINER helper that sha256-hashes the `x-household-token` request header and
+looks it up in `household_tokens` (no `auth.uid()`: there are no user accounts).
+Grants limited to needed verbs; `household_tokens` gets none. Verified 19/19
+against a real Postgres engine (see `supabase/scripts/smoke_test_rls.sql`).
 
 ## 5. Anonymous household auth
 
 1. **Create** — client calls Edge Function `household-create` (never trusts the client to pick the ID/password):
-   - generates `display_code` (6-char base32, unambiguous alphabet) and a strong random password,
+   - generates `display_code` (6-char base32, unambiguous alphabet — see DOCS_DB §2.1) and a strong random password,
    - hashes the password, inserts `households` + default `profile` ("Household"),
    - inserts one `household_token` and returns `{ household_id, display_code, password, access_token }`.
 2. **Join** — Edge Function `household-join(code, password)` verifies the hash and issues a fresh token.
@@ -141,19 +94,19 @@ VAPID-signed Web Push → only that profile's devices show the notification.
 
 ## 7. Modules
 
-**Todo** — CRUD via `src/lib/todos.ts`. Sort: nearest `due_date` first, undated last. Filters: `mine` (active persona) / `household`. Tags autocomplete from existing tags. Completing a task sets `archived_at` (archive on completion).
+**Todo** — CRUD via `src/lib/todos.ts`. Sort: nearest `due_date` first, undated last (partial index `todos_active_deadline_idx` serves exactly this). Filters: `mine` (active persona) / `household`. Tags autocomplete from existing tags. Completing a task sets `completed = true, completed_at = now()` (archive on completion).
 
-**Freezer** — CRUD via `src/lib/freezer.ts`. `added_date` defaults to today. Sort FIFO by `added_date` (oldest first). Consuming sets `consumed_at` (archive to history). Quantity is optional `(numeric, unit)`.
+**Freezer** — CRUD via `src/lib/freezer.ts`. `added_date` defaults to today. Sort FIFO by `added_date` (oldest first). Consuming sets `consumed = true, consumed_at = now()` (archive to history). Quantity is an optional free-form string (`2.5 kg`, `1`, `500 g`).
 
-**Search** — global across todos + freezer: free-text (ILIKE on title/name) and `#tag` containment. Start client-side over loaded data; move to a Postgres RPC if data volume grows.
+**Search** — global across todos + freezer: free-text (ILIKE on title/name) and `#tag` containment (GIN `@>`). Start client-side over loaded data; move to a Postgres RPC if data volume grows.
 
 **Push** — see §8.
 
 ## 8. Push notifications (targeted)
 
 - VAPID keypair: `npx web-push generate-vapid-keys`. Public → `VITE_VAPID_PUBLIC_KEY`; private → Edge Function secret.
-- Registration: `PushManager.subscribe({ userVisibleOnly: true, applicationServerKey })` → upsert `push_subscriptions` for `(household_id, active_profile_id, device_id)`.
-- Targeting: assigning a todo to Profile B invokes `push-notify` with `{ household_id, profile_id, todo }`. The function queries subscriptions scoped to that household **and** profile, then sends each endpoint a VAPID-signed push with a minimal payload (todo id + title).
+- Registration: `PushManager.subscribe({ userVisibleOnly: true, applicationServerKey })` → upsert `device_subscriptions` for `(household_id, active_profile_id, device_id)`.
+- Targeting: assigning a todo to Profile B invokes `push-notify` with `{ household_id, profile_id, todo }`. The function queries subscriptions scoped to that household **and** profile (index `device_subscriptions_profile_idx`), then sends each endpoint a VAPID-signed push with a minimal payload (todo id + title).
 - Service worker handles `push` → `showNotification`; `notificationclick` → focus/open the app (deep-link to the todo in Phase 4).
 - Anti-abuse: rate-limit invocations per household in the function (Phase 4).
 
@@ -166,17 +119,19 @@ VAPID-signed Web Push → only that profile's devices show the notification.
 ## 10. Security checklist
 
 - [x] No secrets in client bundles (anon key only) — enforced by convention in AGENTS.md
-- [ ] RLS enabled + policies on all 6 tables
-- [ ] Passwords hashed server-side; tokens stored hashed
-- [ ] `display_code`/password generated server-side (not client-chosen)
+- [x] RLS enabled + policies on all 6 tables — verified 19/19 (smoke test)
+- [x] Cross-household reference guard (profile → same household) via triggers
+- [x] Tokens stored hashed (sha256); `household_tokens` deny-all for anon
+- [x] `display_code` format constrained at the DB level (generator must match)
+- [ ] Password hashing with a strong algorithm (Edge Function, Phase 1)
 - [ ] Brute-force protection on join (rate limit in Edge Function)
-- [ ] Cross-household access impossible (token-derived scoping)
+- [ ] Household wipe + token revocation UI (Phase 4)
 - [ ] No PII anywhere (no emails/phones/analytics)
 - [ ] Edge Functions: CORS restricted, secrets via env only
 
 ## 11. Roadmap
 
-Phase 0 (workspace) ✅ → Phase 1 (data layer + auth) → Phase 2 (modules + UI) →
+Phase 0 (workspace) ✅ → Phase 1 (data layer + auth — **schema done**, client + Edge Functions next) → Phase 2 (modules + UI) →
 Phase 3 (PWA/offline) → Phase 4 (push + launch). Detailed tasks & acceptance
 criteria: [`TASKS.md`](TASKS.md).
 
