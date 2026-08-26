@@ -39,6 +39,7 @@ Architecture context: `PROJECT_PLAN.md` · Conventions: `AGENTS.md`.
 
 **DoD (Phase 1):** create household on device A → join on device B → shared data visible on both;
 SQL probe proves cross-household SELECT/UPDATE returns zero rows.
+✅ **LIVE-VERIFIED 2026-08-26**: all 7 Edge Functions deployed to the shared instance; 13/13 smoke steps pass (create → join → CRUD → complete → full-text + #tag search → profile rename → freezer FIFO → push dispatch → validation → isolation). Run `npm run check:functions` before deploying.
 
 ---
 
