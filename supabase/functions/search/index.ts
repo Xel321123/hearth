@@ -10,7 +10,7 @@ import { handle } from "../_shared/handlers.ts";
 import { json } from "../_shared/cors.ts";
 import { ApiError, mapDbError } from "../_shared/errors.ts";
 import { buildSearchSpec } from "../_shared/search.ts";
-import { callerClient } from "../_shared/supabase.ts";
+import { callerClient, requireHouseholdToken } from "../_shared/supabase.ts";
 
 const RESULT_LIMIT = 20;
 

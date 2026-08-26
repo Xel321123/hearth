@@ -37,7 +37,7 @@ Deno.serve(
     const body = await readJson(req);
     const householdId = validateUuid(body.household_id, "household_id");
     const profileId = validateUuid(body.profile_id, "profile_id");
-    const todo = body.todo;
+    const todo = body.todo as Record<string, unknown> | null | undefined;
     if (typeof todo !== "object" || todo === null) {
       throw new ApiError(400, "VALIDATION_ERROR", "todo is required");
     }

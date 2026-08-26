@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "check:functions": "tsc -p supabase/tsconfig.json",
     "test": "node --experimental-strip-types --test supabase/tests/codes.test.ts supabase/tests/auth.test.ts supabase/tests/validation.test.ts supabase/tests/search.test.ts supabase/tests/push.test.ts supabase/tests/rls_integration.test.ts",
     "test:unit": "node --experimental-strip-types --test supabase/tests/codes.test.ts supabase/tests/auth.test.ts supabase/tests/validation.test.ts supabase/tests/search.test.ts supabase/tests/push.test.ts",
     "test:db": "node --experimental-strip-types --test supabase/tests/rls_integration.test.ts"

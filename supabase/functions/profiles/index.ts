@@ -12,7 +12,7 @@ import { handle, readJson } from "../_shared/handlers.ts";
 import { json } from "../_shared/cors.ts";
 import { ApiError, mapDbError } from "../_shared/errors.ts";
 import { validateProfileName, validateUuid } from "../_shared/validation.ts";
-import { callerClient } from "../_shared/supabase.ts";
+import { callerClient, requireHouseholdToken } from "../_shared/supabase.ts";
 
 Deno.serve(
   handle(async (req) => {

@@ -17,7 +17,7 @@ import {
   validateTodoTitle,
   validateUuid,
 } from "../_shared/validation.ts";
-import { callerClient } from "../_shared/supabase.ts";
+import { callerClient, requireHouseholdToken } from "../_shared/supabase.ts";
 import type { TodoView } from "../_shared/types.ts";
 
 const DEFAULT_LIMIT = 50;
