@@ -57,6 +57,38 @@ npm run dev               # → http://localhost:5173
 > read [`AGENTS.md`](AGENTS.md) first — it codifies the secret-handling and
 > Supabase zero-trust rules that keep this app private.
 
+## Backend — Supabase Edge Functions
+
+All server logic lives in `supabase/functions/` (Deno, zero runtime deps):
+
+| Function | Purpose | DB access |
+|---|---|---|
+| `household-create` | create household: display code, PBKDF2-hashed password, default profile, access token | service role (server-side flow) |
+| `household-join` | verify code + password (rate-limited), issue fresh token | service role (server-side flow) |
+| `profiles` | create / rename / delete (≤5, DB-enforced) | caller token → RLS |
+| `todos` | CRUD + complete→archive | caller token → RLS |
+| `freezer` | CRUD + consume→archive, FIFO list | caller token → RLS |
+| `search` | full-text + `#tag` search across both modules | caller token → RLS |
+| `push-notify` | targeted Web Push (VAPID) to a profile's devices | caller token → RLS |
+
+All handlers run **strict validation** before touching the DB (mirrors the CHECK
+constraints), and CRUD/search functions run as the caller with the
+`x-household-token` forwarded — RLS remains the enforcement boundary.
+
+**Deploy** (needs `supabase login` once, or paste each `index.ts` into
+Dashboard → Edge Functions):
+```bash
+supabase functions deploy household-create household-join profiles todos freezer search push-notify
+supabase secrets set SUPABASE_SERVICE_ROLE_KEY VAPID_PRIVATE_KEY VAPID_PUBLIC_KEY VAPID_SUBJECT
+```
+`VAPID_SUBJECT` is a `mailto:` or URL for the push service (default
+`mailto:hearth@localhost`). Service role + VAPID private key are
+**server-side only** — never in client code.
+
+**Tests:** `npm test` — 40 unit + integration tests (auth crypto, validation,
+push targeting, RLS isolation) running the real migrations against a Postgres
+engine (PGlite). `npm run test:db` for the DB suite only.
+
 ## Repository docs
 
 - [`DOCS_DB.md`](DOCS_DB.md) — database schema: tables, relations, RLS enforcement, indexes.

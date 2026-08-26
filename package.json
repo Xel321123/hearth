@@ -8,7 +8,10 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test supabase/tests/codes.test.ts supabase/tests/auth.test.ts supabase/tests/validation.test.ts supabase/tests/search.test.ts supabase/tests/push.test.ts supabase/tests/rls_integration.test.ts",
+    "test:unit": "node --experimental-strip-types --test supabase/tests/codes.test.ts supabase/tests/auth.test.ts supabase/tests/validation.test.ts supabase/tests/search.test.ts supabase/tests/push.test.ts",
+    "test:db": "node --experimental-strip-types --test supabase/tests/rls_integration.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
@@ -16,6 +19,7 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.7",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.3.0",
     "@types/react": "^19.2.18",

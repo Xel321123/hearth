@@ -25,10 +25,11 @@ Architecture context: `PROJECT_PLAN.md` · Conventions: `AGENTS.md`.
 - [x] Migration `0002_core_schema.sql`: `households`, `household_tokens`, `profiles`, `todos`, `freezer_items`, `device_subscriptions` + indexes (active-deadline partial, FIFO added_date, subscription profile, GIN tags) + triggers (5-profile cap advisory-locked, cross-household profile guard) + CHECKs (tags, completed⇔completed_at, display_code)
 - [x] RLS on every table (ENABLE + FORCE) + token-gated policies (`hearth_private.current_household_id()` SECURITY DEFINER in unexposed schema, `(SELECT …)`-wrapped for per-query evaluation) + GRANTs (anon + authenticated; `household_tokens` deny-all) — **verified 19/19 against a Postgres engine** (`supabase/scripts/smoke_test_rls.sql`)
 - [x] `DOCS_DB.md` — tables, relations, RLS enforcement, operations
-- [x] `supabase/seed.sql` — dev/demo seed (2 households, known tokens, cap-max profiles)
-- [ ] Edge Function `household-create`: generates display_code (6-char base32, alphabet `ABCDEFGHJKMNPQRSTVWXYZ23456789`), strong password, hashes it, inserts household + default profile + token
-- [ ] Edge Function `household-join`: verify code+password → issue token; rate-limit attempts
-- [ ] Dashboard: expose `hearth` schema (Project Settings → API → Exposed schemas)
+- [x] `supabase/seed.sql` — dev/demo seed (2 households, known tokens, cap-max profiles, real PBKDF2 hashes)
+- [x] Edge Function `household-create`: display code (alphabet `ABCDEFGHJKMNPQRSTVWXYZ23456789`), 16-char secure password, PBKDF2-HMAC-SHA256 (600k iter), default profile, access token — collision-retry on insert
+- [x] Edge Function `household-join`: verify code+password (constant-time, no enumeration), issue token, per-IP rate limit (10/10min)
+- [x] Migration `0004_search_vectors.sql`: generated tsvector columns (IMMUTABLE wrapper — array_to_string is STABLE) + GIN indexes
+- [x] Dashboard: expose `hearth` schema (Project Settings → API → Exposed schemas) — **done on live instance**
 
 **Client**
 - [ ] `src/lib/supabase.ts` wired (done in scaffold)
@@ -43,6 +44,7 @@ SQL probe proves cross-household SELECT/UPDATE returns zero rows.
 
 ## Phase 2 — Core modules (Todo + Freezer + Search)
 
+- [x] Backend service layer (Step 3): `profiles` / `todos` / `freezer` / `search` Edge Functions — strict input validation mirroring the DB CHECKs; CRUD runs as caller + RLS; FIFO + deadline ordering; full-text (`search_vector` wfts) + `#tag` search; **40/40 tests green** (`npm test`)
 - [ ] Todo CRUD + complete→archive + sort by nearest deadline + "My Tasks"/"Household" filter
 - [ ] Freezer CRUD + FIFO sort + consume→archive + optional weight/quantity
 - [ ] Global search: free-text + `#tag` across todos and freezer items
@@ -69,9 +71,9 @@ flush on reconnect; Lighthouse PWA audit ≥ 90.
 
 ## Phase 4 — Push notifications & launch
 
-- [ ] VAPID keys (public → `VITE_VAPID_PUBLIC_KEY`; private → Edge Function secret)
+- [x] VAPID keys generated (public → `VITE_VAPID_PUBLIC_KEY`; private → Edge Function secret)
 - [ ] `push_subscriptions` upsert on persona change / permission grant (`src/lib/push.ts`)
-- [ ] Edge Function `push-notify`: targeted delivery for (household_id, profile_id) + per-household rate limit
+- [x] Edge Function `push-notify`: targeted delivery for (household_id, profile_id) via caller token + RLS + per-household rate limit (60/10min)
 - [ ] Service worker: `push` → `showNotification`; `notificationclick` → open app (deep-link to todo)
 - [ ] Notification settings per device (e.g. mute assignment notifications)
 - [ ] Household delete/wipe + token revocation

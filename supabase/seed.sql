@@ -4,11 +4,10 @@
 --   alpha: display code HEARTH, token  dev-token-alpha  (5 profiles, at the cap)
 --   beta : display code BETAMN, token  dev-token-beta   (2 profiles)
 --
--- IMPORTANT: this is a DEV/DEMO seed. Password and token hashes below are
--- plain sha256 placeholders so RLS can be tested without the Edge Functions.
--- Production households are created by the `household-create` Edge Function,
--- which hashes a strong random password/token with a proper algorithm.
--- Never ship this seed to production data.
+-- IMPORTANT: this is a DEV/DEMO seed. Password hashes are real PBKDF2 outputs
+-- for the KNOWN dev passwords 'dev-password-alpha'/'dev-password-beta'
+-- (tokens are sha256 of the known dev tokens), so RLS and the join flow can be
+-- exercised without the Edge Functions. Never ship this seed to production data.
 --
 -- Usage: psql "$DATABASE_URL" -f supabase/seed.sql
 --        (or paste into the Supabase SQL editor; RLS is bypassed for the owner)
@@ -16,12 +15,16 @@
 begin;
 
 -- ── households ────────────────────────────────────────────────────────────────
+-- password_hash values are REAL PBKDF2 outputs (pbkdf2$sha256$600000$...) —
+-- generated with the production hasher (scripts/gen-seed-hash.mjs), so the
+-- join flow verifies them exactly like a real household. Re-running upgrades
+-- existing placeholder hashes (DO UPDATE).
 insert into hearth.households (id, display_code, password_hash) values
   ('00000000-0000-0000-0000-000000000001', 'HEARTH',
-   encode(sha256('dev-password-alpha'::bytea), 'hex')),
+   'pbkdf2$sha256$600000$EF6Yb7l0IUM+0903lHv/QQ==$vz38RsOaxj0fgH1ZkKQmd0xoz2c8XZXKDIVLDja525g='),
   ('00000000-0000-0000-0000-000000000002', 'BETAMN',
-   encode(sha256('dev-password-beta'::bytea), 'hex'))
-on conflict (id) do nothing;
+   'pbkdf2$sha256$600000$vl3DE9OwMwEHu/GIK0Y7Tw==$u8Fene2UX/JuYYLeOLg5A4f7srMz+S8haBWxqluVBxc=')
+on conflict (id) do update set password_hash = excluded.password_hash;
 
 -- ── access tokens (hashed) ────────────────────────────────────────────────────
 insert into hearth.household_tokens (token_hash, household_id) values

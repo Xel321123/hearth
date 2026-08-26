@@ -80,11 +80,12 @@ against a real Postgres engine (see `supabase/scripts/smoke_test_rls.sql`).
 
 ## 5. Anonymous household auth
 
-1. **Create** — client calls Edge Function `household-create` (never trusts the client to pick the ID/password):
-   - generates `display_code` (6-char base32, unambiguous alphabet — see DOCS_DB §2.1) and a strong random password,
-   - hashes the password, inserts `households` + default `profile` ("Household"),
-   - inserts one `household_token` and returns `{ household_id, display_code, password, access_token }`.
-2. **Join** — Edge Function `household-join(code, password)` verifies the hash and issues a fresh token.
+1. **Create** — Edge Function `household-create` (implemented):
+   - generates `display_code` (6-char Crockford base32 minus 0/1 — alphabet `ABCDEFGHJKMNPQRSTVWXYZ23456789`, collision-retry on the unique constraint) and a 16-char cryptographically secure password (unbiased rejection sampling),
+   - hashes the password server-side with **PBKDF2-HMAC-SHA256, 600k iterations** (self-describing `pbkdf2$sha256$600000$salt$hash` format — upgradeable),
+   - inserts `households` + default `profile` ("Household" or client-provided name),
+   - inserts one `household_token` (sha256 of the token — matches the RLS helper) and returns `{ household_id, display_code, password, access_token, profile }`.
+2. **Join** — Edge Function `household-join` (implemented): verifies the hash constant-time (same error for unknown code vs wrong password — no enumeration), issues a fresh token, rate-limited per IP (10/10 min).
 3. **Session** — client persists `{ household_id, access_token }` in localStorage and sends the token as the `x-household-token` header on every request.
 4. **No reset, no recovery** — deliberate. Passwords are only ever hashed; support story is "start a new household".
 5. **Delete** — household wipe (CASCADE) + token revocation (Phase 4).
@@ -107,11 +108,10 @@ against a real Postgres engine (see `supabase/scripts/smoke_test_rls.sql`).
 
 ## 8. Push notifications (targeted)
 
-- VAPID keypair: `npx web-push generate-vapid-keys`. Public → `VITE_VAPID_PUBLIC_KEY`; private → Edge Function secret.
-- Registration: `PushManager.subscribe({ userVisibleOnly: true, applicationServerKey })` → upsert `device_subscriptions` for `(household_id, active_profile_id, device_id)`.
-- Targeting: assigning a todo to Profile B invokes `push-notify` with `{ household_id, profile_id, todo }`. The function queries subscriptions scoped to that household **and** profile (index `device_subscriptions_profile_idx`), then sends each endpoint a VAPID-signed push with a minimal payload (todo id + title).
+- VAPID keypair generated; public key → `VITE_VAPID_PUBLIC_KEY`; private key → Edge Function secret.
+- Registration: `PushManager.subscribe({ userVisibleOnly: true, applicationServerKey })` → upsert `device_subscriptions` for `(household_id, active_profile_id, device_id)` (client work, Phase 4).
+- Targeting: assigning a todo to Profile B invokes `push-notify` with `{ household_id, profile_id, todo }` — **implemented**. Subscriptions are read via the caller's token (RLS scopes them to the caller's household), filtered to the target profile (index `device_subscriptions_profile_idx`), and dispatched with a VAPID-signed, aes128gcm-encrypted push (`npm:web-push`), TTL 24h, urgency high. Per-household rate limit (60/10 min, best-effort per isolate).
 - Service worker handles `push` → `showNotification`; `notificationclick` → focus/open the app (deep-link to the todo in Phase 4).
-- Anti-abuse: rate-limit invocations per household in the function (Phase 4).
 
 ## 9. PWA & offline
 

@@ -201,7 +201,13 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON hearth.profiles, hearth.todos,
 | `device_subscriptions_profile_idx` | device_subscriptions `(household_id, profile_id)` | **push targeting by profile** |
 | `todos_tags_gin` | todos `USING gin (tags)` | `#tag` search (`@>`, `&&`) |
 | `freezer_items_tags_gin` | freezer_items `USING gin (tags)` | `#tag` search |
+| `todos_search_gin` / `freezer_items_search_gin` | `USING gin (search_vector)` | full-text search (migration 0004) |
 | `profiles_household_idx`, `household_tokens_household_idx`, `todos_household_idx`, `freezer_items_household_idx` | FK columns | cascade deletes + joins |
+
+`search_vector` is a generated column (migration 0004) over title/name + tags,
+built by the IMMUTABLE wrapper `hearth_private.immutable_tsvector(text, text[])`
+— required because `to_tsvector`, `array_to_string` and `concat` are STABLE and
+generated columns only accept immutable expressions (42P17).
 
 ## 6. Operating
 
