@@ -19,7 +19,7 @@ is authenticated by a **household access token**:
 ```
 client ── x-household-token: <token> ──▶ PostgREST ──▶ request.headers GUC
                                                           │
-                                          hearth.current_household_id()  (SECURITY DEFINER)
+                                     hearth_private.current_household_id()  (SECURITY DEFINER, unexposed schema)
                                           sha256(token) → household_tokens.token_hash → household_id
                                                           │
                                               RLS policies: WHERE <col>_id = that household_id
@@ -137,9 +137,13 @@ closes the "reference smuggling" hole a pure FK/RLS design leaves open.
 
 ## 4. RLS enforcement
 
-Every table: `ENABLE ROW LEVEL SECURITY` + explicit per-verb policies **TO anon**
-(no `auth.uid()` — there are no users). All policies derive the household from the
-request header via `hearth.current_household_id()`.
+Every table: `ENABLE ROW LEVEL SECURITY` **+ `FORCE`** (RLS applies even to the
+table owner; superusers/service_role with BYPASSRLS remain exempt — that's how
+migrations and Edge Functions work). Explicit per-verb policies **TO anon,
+authenticated** (no `auth.uid()` — there are no users). All policies derive the
+household from the request header via `hearth_private.current_household_id()`,
+**wrapped in `(SELECT …)` so it is evaluated once per query, not per row**
+(verified: plan shows an InitPlan, not a per-row filter).
 
 ### Policy matrix
 
@@ -155,29 +159,32 @@ request header via `hearth.current_household_id()`.
 INSERT uses `WITH CHECK`; SELECT/UPDATE/DELETE use `USING` (UPDATE also re-checks
 `WITH CHECK` on the new row).
 
-### Helper functions
+### Helper functions (all in `hearth_private` — NOT exposed to the Data API)
 
 | function | kind | purpose |
 |---|---|---|
-| `hearth.request_header(text)` | STABLE, plain | case-insensitive read of a PostgREST header from the `request.headers` GUC |
-| `hearth.current_household_id()` | STABLE, **SECURITY DEFINER**, search_path pinned | sha256(header) → `household_tokens` → household uuid; NULL = unauthenticated |
-| `hearth.tags_valid(text[])` | IMMUTABLE | CHECK-constraint validator for tag arrays |
-| `hearth.enforce_profile_limit()` | plpgsql, **SECURITY DEFINER** | trigger: ≤ 5 profiles, advisory-locked |
-| `hearth.enforce_profile_household()` | plpgsql, **SECURITY DEFINER** | trigger: profile belongs to same household |
+| `hearth_private.request_header(text)` | STABLE, plain | case-insensitive read of a PostgREST header from the `request.headers` GUC |
+| `hearth_private.current_household_id()` | STABLE, **SECURITY DEFINER**, search_path pinned | sha256(header) → `household_tokens` → household uuid; NULL = unauthenticated |
+| `hearth_private.tags_valid(text[])` | IMMUTABLE | CHECK-constraint validator for tag arrays |
+| `hearth_private.enforce_profile_limit()` | plpgsql, **SECURITY DEFINER** | trigger: ≤ 5 profiles, advisory-locked |
+| `hearth_private.enforce_profile_household()` | plpgsql, **SECURITY DEFINER** | trigger: profile belongs to same household |
 
 SECURITY DEFINER + pinned `search_path` (`hearth, pg_catalog`) = the helper can
 read `household_tokens` on behalf of anon without exposing it, and can't be
-hijacked via search_path manipulation. Execution privileges: REVOKE from PUBLIC,
-GRANT to anon only (tags_valid is needed by CHECKs that run as anon; trigger
-functions fire as the inserting user).
+hijacked via search_path manipulation. **The private schema means these
+functions are never callable as PostgREST RPC endpoints** (only exposed schemas
+produce RPCs). Execution privileges: REVOKE from PUBLIC, GRANT to
+anon/authenticated only (tags_valid is needed by CHECKs that run as the DML
+role; trigger functions fire as the inserting role).
 
-### Grants (anon)
+### Grants (anon + authenticated)
 
 ```
-GRANT USAGE ON SCHEMA hearth TO anon;
-GRANT SELECT ON hearth.households TO anon;
+GRANT USAGE ON SCHEMA hearth TO anon, authenticated;
+GRANT USAGE ON SCHEMA hearth_private TO anon, authenticated;
+GRANT SELECT ON hearth.households TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON hearth.profiles, hearth.todos,
-      hearth.freezer_items, hearth.device_subscriptions TO anon;
+      hearth.freezer_items, hearth.device_subscriptions TO anon, authenticated;
 -- household_tokens: NO grants
 ```
 

@@ -23,7 +23,7 @@ Architecture context: `PROJECT_PLAN.md` · Conventions: `AGENTS.md`.
 
 **Supabase (schema `hearth`)**
 - [x] Migration `0002_core_schema.sql`: `households`, `household_tokens`, `profiles`, `todos`, `freezer_items`, `device_subscriptions` + indexes (active-deadline partial, FIFO added_date, subscription profile, GIN tags) + triggers (5-profile cap advisory-locked, cross-household profile guard) + CHECKs (tags, completed⇔completed_at, display_code)
-- [x] RLS on every table + token-gated policies (`current_household_id()` SECURITY DEFINER helper on `x-household-token`) + GRANTs (anon only; `household_tokens` deny-all) — **verified 19/19 against a Postgres engine** (`supabase/scripts/smoke_test_rls.sql`)
+- [x] RLS on every table (ENABLE + FORCE) + token-gated policies (`hearth_private.current_household_id()` SECURITY DEFINER in unexposed schema, `(SELECT …)`-wrapped for per-query evaluation) + GRANTs (anon + authenticated; `household_tokens` deny-all) — **verified 19/19 against a Postgres engine** (`supabase/scripts/smoke_test_rls.sql`)
 - [x] `DOCS_DB.md` — tables, relations, RLS enforcement, operations
 - [x] `supabase/seed.sql` — dev/demo seed (2 households, known tokens, cap-max profiles)
 - [ ] Edge Function `household-create`: generates display_code (6-char base32, alphabet `ABCDEFGHJKMNPQRSTVWXYZ23456789`), strong password, hashes it, inserts household + default profile + token

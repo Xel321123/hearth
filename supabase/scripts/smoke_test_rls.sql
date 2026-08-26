@@ -7,7 +7,8 @@
 -- Setup (Supabase SQL editor or local Postgres):
 --   1. apply migrations 0001 + 0002
 --   2. run supabase/seed.sql (creates alpha + beta demo households)
---   3. locally only: CREATE ROLE anon NOLOGIN;  (Supabase has it built in)
+--   3. locally only: CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;
+--      (Supabase has both built in)
 --
 -- Run: psql "$DATABASE_URL" -f supabase/scripts/smoke_test_rls.sql
 --

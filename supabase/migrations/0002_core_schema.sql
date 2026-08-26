@@ -3,22 +3,33 @@
 -- Shared-instance convention: everything lives in the isolated `hearth` schema (never `public`).
 -- Auth model: anonymous households — there is NO auth.users. Every request is
 -- authenticated by a bearer token sent in the `x-household-token` request header.
--- RLS policies resolve that token to a household via hearth.current_household_id()
--- (SECURITY DEFINER). Full explanation: DOCS_DB.md.
+-- RLS policies resolve that token to a household via
+-- hearth_private.current_household_id() (SECURITY DEFINER, private schema).
+-- Full explanation: DOCS_DB.md.
+--
+-- Security notes (per Supabase skill guidance):
+--   * SECURITY DEFINER helpers live in `hearth_private` (NOT an exposed schema),
+--     so they are never callable as PostgREST RPC endpoints.
+--   * Policy functions are wrapped in (SELECT ...) so they are evaluated once
+--     per query instead of once per row.
+--   * FORCE ROW LEVEL SECURITY applies RLS even to the table owner
+--     (superusers/service_role still bypass, as they have BYPASSRLS).
+--   * Policies target anon + authenticated (registered zero-trust standard).
 --
 -- Re-runnable: CREATE ... IF NOT EXISTS / DROP POLICY IF EXISTS / OR REPLACE.
 
 begin;
 
 create schema if not exists hearth;
+create schema if not exists hearth_private;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- helpers
+-- private helpers (hearth_private = NOT exposed to the Data API)
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- Case-insensitive read of a request header exposed by PostgREST via the
 -- `request.headers` GUC (JSON text). NULL when absent.
-create or replace function hearth.request_header(name text)
+create or replace function hearth_private.request_header(name text)
 returns text
 language sql
 stable
@@ -31,13 +42,10 @@ as $$
   limit 1
 $$;
 
-comment on function hearth.request_header(text) is
-  'Reads a PostgREST request header from the request.headers GUC.';
-
 -- Tag format rule used by CHECK constraints on todos.tags / freezer_items.tags.
 -- Tags are stored WITHOUT the leading '#' (UI adds it); 1-30 chars of
 -- a-z A-Z 0-9 _ -, no whitespace, max 20 tags per row.
-create or replace function hearth.tags_valid(tags text[])
+create or replace function hearth_private.tags_valid(tags text[])
 returns boolean
 language sql
 immutable
@@ -52,11 +60,8 @@ as $$
   from unnest(coalesce(tags, array[]::text[])) as t(tag)
 $$;
 
-comment on function hearth.tags_valid(text[]) is
-  'Validates tag arrays: 1-30 chars of [a-zA-Z0-9_-] each, no whitespace.';
-
 -- ─────────────────────────────────────────────────────────────────────────────
--- tables
+-- tables (hearth)
 -- ─────────────────────────────────────────────────────────────────────────────
 
 create table if not exists hearth.households (
@@ -74,8 +79,8 @@ comment on table hearth.households is
 
 -- Join/access tokens, stored HASHED (sha256 hex). The raw token is returned to
 -- the client once at create/join time and sent as the x-household-token header.
--- No direct anon access: only hearth.current_household_id() (SECURITY DEFINER)
--- reads this table.
+-- No direct access: only hearth_private.current_household_id() (SECURITY
+-- DEFINER) reads this table.
 create table if not exists hearth.household_tokens (
   token_hash   text primary key check (token_hash ~ '^[a-f0-9]{64}$'),
   household_id uuid not null references hearth.households(id) on delete cascade,
@@ -86,7 +91,7 @@ comment on table hearth.household_tokens is
   'Hashed household access tokens; deny-all for anon (helper functions only).';
 
 -- Person profiles (names only — NOT auth logins). Max 5 per household,
--- enforced by trigger hearth.enforce_profile_limit().
+-- enforced by trigger hearth_private.enforce_profile_limit().
 create table if not exists hearth.profiles (
   id           uuid primary key default gen_random_uuid(),
   household_id uuid not null references hearth.households(id) on delete cascade,
@@ -106,7 +111,7 @@ create table if not exists hearth.todos (
   title        text not null check (char_length(title) between 1 and 200),
   due_date     date,
   tags         text[] not null default '{}'
-                 check (cardinality(tags) <= 20 and hearth.tags_valid(tags)),
+                 check (cardinality(tags) <= 20 and hearth_private.tags_valid(tags)),
   completed    boolean not null default false,
   completed_at timestamptz,
   created_at   timestamptz not null default now(),
@@ -128,7 +133,7 @@ create table if not exists hearth.freezer_items (
   -- free-form quantity/unit string, e.g. '2.5 kg', '1', '500 g'
   quantity     text check (quantity is null or char_length(quantity) between 1 and 30),
   tags         text[] not null default '{}'
-                 check (cardinality(tags) <= 20 and hearth.tags_valid(tags)),
+                 check (cardinality(tags) <= 20 and hearth_private.tags_valid(tags)),
   consumed     boolean not null default false,
   consumed_at  timestamptz,
   created_at   timestamptz not null default now(),
@@ -163,12 +168,35 @@ comment on table hearth.device_subscriptions is
   'Push subscriptions keyed by (household, profile, device) for targeted notifications.';
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- RLS helper (defined AFTER the tables — SQL-language functions resolve their
+-- referenced relations at CREATE time)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Hashes the x-household-token header and resolves it to the requesting
+-- household's id. NULL = missing/invalid token → policies deny.
+create or replace function hearth_private.current_household_id()
+returns uuid
+language sql
+stable
+security definer
+set search_path = hearth, pg_catalog
+as $$
+  select t.household_id
+  from hearth.household_tokens as t
+  where t.token_hash = encode(sha256(hearth_private.request_header('x-household-token')::bytea), 'hex')
+  limit 1
+$$;
+
+comment on function hearth_private.current_household_id() is
+  'RLS helper: resolves the x-household-token header to a household id. NULL = no/invalid token.';
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- integrity triggers
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- Max 5 profiles per household. Advisory-locked count makes it safe under
 -- concurrent inserts (real constraint, not best-effort).
-create or replace function hearth.enforce_profile_limit()
+create or replace function hearth_private.enforce_profile_limit()
 returns trigger
 language plpgsql
 security definer
@@ -187,11 +215,11 @@ drop trigger if exists profiles_max_5 on hearth.profiles;
 create trigger profiles_max_5
   before insert on hearth.profiles
   for each row
-  execute function hearth.enforce_profile_limit();
+  execute function hearth_private.enforce_profile_limit();
 
 -- A row referencing a profile must reference a profile of the SAME household.
 -- (FKs alone can't express this; prevents cross-household reference smuggling.)
-create or replace function hearth.enforce_profile_household()
+create or replace function hearth_private.enforce_profile_household()
 returns trigger
 language plpgsql
 security definer
@@ -217,39 +245,19 @@ drop trigger if exists todos_profile_household_match on hearth.todos;
 create trigger todos_profile_household_match
   before insert or update on hearth.todos
   for each row
-  execute function hearth.enforce_profile_household();
+  execute function hearth_private.enforce_profile_household();
 
 drop trigger if exists freezer_profile_household_match on hearth.freezer_items;
 create trigger freezer_profile_household_match
   before insert or update on hearth.freezer_items
   for each row
-  execute function hearth.enforce_profile_household();
+  execute function hearth_private.enforce_profile_household();
 
 drop trigger if exists device_sub_profile_household_match on hearth.device_subscriptions;
 create trigger device_sub_profile_household_match
   before insert or update on hearth.device_subscriptions
   for each row
-  execute function hearth.enforce_profile_household();
-
--- ─────────────────────────────────────────────────────────────────────────────
--- RLS helper: current request's household, derived from the bearer token
--- ─────────────────────────────────────────────────────────────────────────────
-
-create or replace function hearth.current_household_id()
-returns uuid
-language sql
-stable
-security definer
-set search_path = hearth, pg_catalog
-as $$
-  select t.household_id
-  from hearth.household_tokens as t
-  where t.token_hash = encode(sha256(hearth.request_header('x-household-token')::bytea), 'hex')
-  limit 1
-$$;
-
-comment on function hearth.current_household_id() is
-  'RLS helper: hashes the x-household-token header and resolves it to a household id. NULL = no/invalid token.';
+  execute function hearth_private.enforce_profile_household();
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- indexes
@@ -272,7 +280,7 @@ create index if not exists device_subscriptions_profile_idx
 create index if not exists todos_tags_gin on hearth.todos using gin (tags);
 create index if not exists freezer_items_tags_gin on hearth.freezer_items using gin (tags);
 
--- FK cascade/lookup support
+-- FK cascade/lookup support (best practice: index every FK column)
 create index if not exists profiles_household_idx on hearth.profiles (household_id);
 create index if not exists household_tokens_household_idx on hearth.household_tokens (household_id);
 create index if not exists todos_household_idx on hearth.todos (household_id);
@@ -289,12 +297,26 @@ alter table hearth.todos enable row level security;
 alter table hearth.freezer_items enable row level security;
 alter table hearth.device_subscriptions enable row level security;
 
--- households: anon may read its own row only. Creation, password hashing and
--- wipe are server-side flows (Edge Functions, service role) — no anon INSERT/UPDATE/DELETE.
+-- FORCE: RLS applies even to the table owner (superusers/service_role with
+-- BYPASSRLS are still exempt by design — that's how migrations and the
+-- Edge Functions work).
+alter table hearth.households force row level security;
+alter table hearth.household_tokens force row level security;
+alter table hearth.profiles force row level security;
+alter table hearth.todos force row level security;
+alter table hearth.freezer_items force row level security;
+alter table hearth.device_subscriptions force row level security;
+
+-- Helper is wrapped in (SELECT ...) so it is evaluated ONCE per query,
+-- not once per row (RLS performance best practice).
+
+-- households: anon/authenticated may read their own row only. Creation,
+-- password hashing and wipe are server-side flows (Edge Functions, service
+-- role) — no INSERT/UPDATE/DELETE policies here.
 drop policy if exists households_select_own on hearth.households;
 create policy households_select_own on hearth.households
-  for select to anon
-  using (id = hearth.current_household_id());
+  for select to anon, authenticated
+  using (id = (select hearth_private.current_household_id()));
 
 -- household_tokens: RLS enabled with ZERO policies = deny all for anon.
 -- The SECURITY DEFINER helper reads it on the app's behalf.
@@ -302,115 +324,117 @@ create policy households_select_own on hearth.households
 -- profiles: full CRUD, strictly own-household.
 drop policy if exists profiles_select_own on hearth.profiles;
 create policy profiles_select_own on hearth.profiles
-  for select to anon
-  using (household_id = hearth.current_household_id());
+  for select to anon, authenticated
+  using (household_id = (select hearth_private.current_household_id()));
 
 drop policy if exists profiles_insert_own on hearth.profiles;
 create policy profiles_insert_own on hearth.profiles
-  for insert to anon
-  with check (household_id = hearth.current_household_id());
+  for insert to anon, authenticated
+  with check (household_id = (select hearth_private.current_household_id()));
 
 drop policy if exists profiles_update_own on hearth.profiles;
 create policy profiles_update_own on hearth.profiles
-  for update to anon
-  using (household_id = hearth.current_household_id())
-  with check (household_id = hearth.current_household_id());
+  for update to anon, authenticated
+  using (household_id = (select hearth_private.current_household_id()))
+  with check (household_id = (select hearth_private.current_household_id()));
 
 drop policy if exists profiles_delete_own on hearth.profiles;
 create policy profiles_delete_own on hearth.profiles
-  for delete to anon
-  using (household_id = hearth.current_household_id());
+  for delete to anon, authenticated
+  using (household_id = (select hearth_private.current_household_id()));
 
 -- todos: full CRUD, strictly own-household.
 drop policy if exists todos_select_own on hearth.todos;
 create policy todos_select_own on hearth.todos
-  for select to anon
-  using (household_id = hearth.current_household_id());
+  for select to anon, authenticated
+  using (household_id = (select hearth_private.current_household_id()));
 
 drop policy if exists todos_insert_own on hearth.todos;
 create policy todos_insert_own on hearth.todos
-  for insert to anon
-  with check (household_id = hearth.current_household_id());
+  for insert to anon, authenticated
+  with check (household_id = (select hearth_private.current_household_id()));
 
 drop policy if exists todos_update_own on hearth.todos;
 create policy todos_update_own on hearth.todos
-  for update to anon
-  using (household_id = hearth.current_household_id())
-  with check (household_id = hearth.current_household_id());
+  for update to anon, authenticated
+  using (household_id = (select hearth_private.current_household_id()))
+  with check (household_id = (select hearth_private.current_household_id()));
 
 drop policy if exists todos_delete_own on hearth.todos;
 create policy todos_delete_own on hearth.todos
-  for delete to anon
-  using (household_id = hearth.current_household_id());
+  for delete to anon, authenticated
+  using (household_id = (select hearth_private.current_household_id()));
 
 -- freezer_items: full CRUD, strictly own-household.
 drop policy if exists freezer_items_select_own on hearth.freezer_items;
 create policy freezer_items_select_own on hearth.freezer_items
-  for select to anon
-  using (household_id = hearth.current_household_id());
+  for select to anon, authenticated
+  using (household_id = (select hearth_private.current_household_id()));
 
 drop policy if exists freezer_items_insert_own on hearth.freezer_items;
 create policy freezer_items_insert_own on hearth.freezer_items
-  for insert to anon
-  with check (household_id = hearth.current_household_id());
+  for insert to anon, authenticated
+  with check (household_id = (select hearth_private.current_household_id()));
 
 drop policy if exists freezer_items_update_own on hearth.freezer_items;
 create policy freezer_items_update_own on hearth.freezer_items
-  for update to anon
-  using (household_id = hearth.current_household_id())
-  with check (household_id = hearth.current_household_id());
+  for update to anon, authenticated
+  using (household_id = (select hearth_private.current_household_id()))
+  with check (household_id = (select hearth_private.current_household_id()));
 
 drop policy if exists freezer_items_delete_own on hearth.freezer_items;
 create policy freezer_items_delete_own on hearth.freezer_items
-  for delete to anon
-  using (household_id = hearth.current_household_id());
+  for delete to anon, authenticated
+  using (household_id = (select hearth_private.current_household_id()));
 
 -- device_subscriptions: full CRUD, strictly own-household.
 drop policy if exists device_subscriptions_select_own on hearth.device_subscriptions;
 create policy device_subscriptions_select_own on hearth.device_subscriptions
-  for select to anon
-  using (household_id = hearth.current_household_id());
+  for select to anon, authenticated
+  using (household_id = (select hearth_private.current_household_id()));
 
 drop policy if exists device_subscriptions_insert_own on hearth.device_subscriptions;
 create policy device_subscriptions_insert_own on hearth.device_subscriptions
-  for insert to anon
-  with check (household_id = hearth.current_household_id());
+  for insert to anon, authenticated
+  with check (household_id = (select hearth_private.current_household_id()));
 
 drop policy if exists device_subscriptions_update_own on hearth.device_subscriptions;
 create policy device_subscriptions_update_own on hearth.device_subscriptions
-  for update to anon
-  using (household_id = hearth.current_household_id())
-  with check (household_id = hearth.current_household_id());
+  for update to anon, authenticated
+  using (household_id = (select hearth_private.current_household_id()))
+  with check (household_id = (select hearth_private.current_household_id()));
 
 drop policy if exists device_subscriptions_delete_own on hearth.device_subscriptions;
 create policy device_subscriptions_delete_own on hearth.device_subscriptions
-  for delete to anon
-  using (household_id = hearth.current_household_id());
+  for delete to anon, authenticated
+  using (household_id = (select hearth_private.current_household_id()));
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- privileges (anon role only — this app never issues JWTs)
+-- privileges (anon + authenticated; this app never issues JWTs, but both
+-- roles are covered per the registered zero-trust standard)
 -- ─────────────────────────────────────────────────────────────────────────────
 
-grant usage on schema hearth to anon;
+grant usage on schema hearth to anon, authenticated;
+grant usage on schema hearth_private to anon, authenticated;
 
-grant select on hearth.households to anon;
+grant select on hearth.households to anon, authenticated;
 
 grant select, insert, update, delete
   on hearth.profiles, hearth.todos, hearth.freezer_items, hearth.device_subscriptions
-  to anon;
+  to anon, authenticated;
 
 -- household_tokens deliberately gets NO grants: deny-all (helper functions only).
 
-revoke all on function hearth.request_header(text) from public;
-revoke all on function hearth.current_household_id() from public;
-revoke all on function hearth.tags_valid(text[]) from public;
-revoke all on function hearth.enforce_profile_limit() from public;
-revoke all on function hearth.enforce_profile_household() from public;
+revoke all on function hearth_private.request_header(text) from public;
+revoke all on function hearth_private.current_household_id() from public;
+revoke all on function hearth_private.tags_valid(text[]) from public;
+revoke all on function hearth_private.enforce_profile_limit() from public;
+revoke all on function hearth_private.enforce_profile_household() from public;
 
-grant execute on function hearth.request_header(text) to anon;
-grant execute on function hearth.current_household_id() to anon;
-grant execute on function hearth.tags_valid(text[]) to anon;           -- used by CHECK constraints as anon
-grant execute on function hearth.enforce_profile_limit() to anon;      -- trigger fires as anon
-grant execute on function hearth.enforce_profile_household() to anon;  -- trigger fires as anon
+grant execute on function hearth_private.request_header(text) to anon, authenticated;
+grant execute on function hearth_private.current_household_id() to anon, authenticated;
+grant execute on function hearth_private.tags_valid(text[]) to anon, authenticated;           -- used by CHECK constraints
+grant execute on function hearth_private.enforce_profile_limit() to anon, authenticated;      -- trigger fires as inserting role
+grant execute on function hearth_private.enforce_profile_household() to anon, authenticated;  -- trigger fires as inserting role
 
 commit;

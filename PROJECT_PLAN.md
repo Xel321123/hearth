@@ -68,10 +68,13 @@ VAPID-signed Web Push → only that profile's devices show the notification.
 todos/freezer_items/device_subscriptions rejects any `profile_id` from a
 different household — FKs alone can't express this.
 
-**RLS strategy (zero-trust).** Every table `ENABLE ROW LEVEL SECURITY`; explicit
-per-verb policies `TO anon` gated on `hearth.current_household_id()` — a SECURITY
-DEFINER helper that sha256-hashes the `x-household-token` request header and
-looks it up in `household_tokens` (no `auth.uid()`: there are no user accounts).
+**RLS strategy (zero-trust).** Every table `ENABLE + FORCE ROW LEVEL SECURITY`;
+explicit per-verb policies `TO anon, authenticated` gated on
+`hearth_private.current_household_id()` — a SECURITY DEFINER helper (in the
+**unexposed** `hearth_private` schema, per Supabase skill guidance) that
+sha256-hashes the `x-household-token` request header and looks it up in
+`household_tokens` (no `auth.uid()`: there are no user accounts). Policy calls
+are wrapped in `(SELECT …)` so the lookup runs once per query, not per row.
 Grants limited to needed verbs; `household_tokens` gets none. Verified 19/19
 against a real Postgres engine (see `supabase/scripts/smoke_test_rls.sql`).
 
