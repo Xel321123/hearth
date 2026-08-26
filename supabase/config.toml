@@ -1,0 +1,6 @@
+# Supabase CLI project config (minimal).
+# See https://supabase.com/docs/reference/cli/config for the full reference.
+# Used by: supabase link / functions deploy / secrets — points the CLI at the
+# shared instance project. Edge Function settings use platform defaults
+# (verify_jwt = true: callers must send a valid anon/publishable key JWT).
+project_id = "ntxtlhbqoqcfvbpbjacc"
