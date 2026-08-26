@@ -16,6 +16,7 @@ import { callerClient } from "../_shared/supabase.ts";
 
 Deno.serve(
   handle(async (req) => {
+    requireHouseholdToken(req);
     const supabase = callerClient(req);
     const url = new URL(req.url);
 

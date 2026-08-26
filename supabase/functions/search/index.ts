@@ -16,6 +16,7 @@ const RESULT_LIMIT = 20;
 
 Deno.serve(
   handle(async (req) => {
+    requireHouseholdToken(req);
     if (req.method !== "GET") {
       throw new ApiError(405, "METHOD_NOT_ALLOWED", "GET required");
     }

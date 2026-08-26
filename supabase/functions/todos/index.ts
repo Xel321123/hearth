@@ -39,6 +39,7 @@ function parsePaging(url: URL): { limit: number; offset: number } {
 
 Deno.serve(
   handle(async (req) => {
+    requireHouseholdToken(req);
     const supabase = callerClient(req);
     const url = new URL(req.url);
 

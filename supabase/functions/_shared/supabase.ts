@@ -1,5 +1,6 @@
 /** Supabase client factories. */
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { ApiError } from "./errors.ts";
 
 function env(name: string): string {
   const v = Deno.env.get(name);
@@ -76,7 +77,7 @@ export function serviceClient(): SupabaseClient {
 export function requireHouseholdToken(req: Request): string {
   const token = req.headers.get("x-household-token");
   if (!token) {
-    throw new Error("missing x-household-token header");
+    throw new ApiError(401, "UNAUTHENTICATED", "missing x-household-token header");
   }
   return token;
 }
