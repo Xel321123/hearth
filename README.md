@@ -85,9 +85,19 @@ supabase secrets set SUPABASE_SERVICE_ROLE_KEY VAPID_PRIVATE_KEY VAPID_PUBLIC_KE
 `mailto:hearth@localhost`). Service role + VAPID private key are
 **server-side only** — never in client code.
 
-**Tests:** `npm test` — 40 unit + integration tests (auth crypto, validation,
-push targeting, RLS isolation) running the real migrations against a Postgres
-engine (PGlite). `npm run test:db` for the DB suite only.
+**Tests:** `npm test` — 59 tests: backend unit/integration (auth crypto,
+validation, push targeting, RLS isolation) running the real migrations against
+a Postgres engine (PGlite) + client unit tests (sort/filter/tags/session/API
+client). `npm run test:client` for client-only, `npm run test:db` for DB only.
+
+**End-to-end (live backend):**
+- `npm run e2e:client` — 18 checks driving the real `src/lib` code against the
+  deployed functions (create/join, profiles, deadline + FIFO ordering,
+  My/Household filters, `#tag` + text search, archive, targeted push
+  `recipients=1`/`0`, cross-household isolation).
+- `npm run e2e:ui` — Playwright browser walkthrough + PWA audit (credentials
+  reveal, persona switching, task assignment/filtering, search, history,
+  manifest, service worker registration/control, iOS install banner).
 
 ## Repository docs
 
@@ -101,12 +111,16 @@ engine (PGlite). `npm run test:db` for the DB suite only.
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Workspace scaffold (this repo, tooling, docs, PWA shell) | ✅ done |
-| 1 | Data layer: `hearth` schema, RLS, anonymous household auth | ⏳ next |
-| 2 | Core modules: Todo, Freezer, Search, persona UI | ⬜ |
-| 3 | PWA & offline: caching, offline queue, install UX | ⬜ |
-| 4 | Push notifications (targeted VAPID delivery) + launch | ⬜ |
+| 1 | Data layer: `hearth` schema, RLS, anonymous household auth | ✅ done (live) |
+| 2 | Core modules: Todo, Freezer, Search, persona UI | ✅ done (verified) |
+| 3 | PWA & offline: caching, offline queue, install UX | ✅ done (audited) |
+| 4 | Push notifications (targeted VAPID delivery) + launch | 🔶 engine live; per-device settings + deploy pending |
 
 ## Status
 
-**Step 1 complete** — repository, workspace, tooling, and planning docs landed.
-See [`TASKS.md`](TASKS.md) for what's next.
+**Steps 1–4 complete as of 2026-08-26.** The full stack is live: PostgreSQL
+schema + RLS on the shared Supabase instance, 7 deployed Edge Functions, and a
+mobile-first React PWA with offline service worker, iOS install banner, and
+targeted Web Push. Verified end-to-end (59/59 tests, 18/18 live client checks,
+18/18 browser checks). Remaining: notification settings, household wipe,
+static-host deploy + real-device push proof — see [`TASKS.md`](TASKS.md).

@@ -1,11 +1,28 @@
+import { HouseholdProvider } from "./hooks/useHousehold";
+import { ToastProvider } from "./hooks/useToast";
+import { AuthView } from "./views/AuthView";
+import { Shell } from "./views/Shell";
+import { useHousehold } from "./hooks/useHousehold";
+import { Spinner } from "./components/Spinner";
+
+function Root() {
+  const { session, loading } = useHousehold();
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950">
+        <Spinner />
+      </div>
+    );
+  }
+  return session ? <Shell /> : <AuthView />;
+}
+
 export default function App() {
   return (
-    <main className="min-h-screen bg-slate-950 p-6 text-slate-100">
-      <h1 className="text-2xl font-semibold">🔥 Hearth</h1>
-      <p className="mt-2 text-slate-400">
-        Privacy-first household workspace — Todo + Freezer. Scaffold is ready;
-        Phase 1 lands the data layer (see TASKS.md).
-      </p>
-    </main>
+    <ToastProvider>
+      <HouseholdProvider>
+        <Root />
+      </HouseholdProvider>
+    </ToastProvider>
   );
 }
