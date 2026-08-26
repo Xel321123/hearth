@@ -53,6 +53,8 @@ function secretKey(): string {
  */
 export function callerClient(req: Request): SupabaseClient {
   return createClient(env("SUPABASE_URL"), publishableKey(), {
+    // Shared-instance convention: never public — pin the project schema.
+    db: { schema: "hearth" },
     global: {
       headers: {
         Authorization: req.headers.get("authorization") ?? "",
@@ -65,7 +67,10 @@ export function callerClient(req: Request): SupabaseClient {
 /** Server-side client (BYPASSRLS). ONLY for flows that must bypass RLS:
  * household-create / household-join. Never in client bundles. */
 export function serviceClient(): SupabaseClient {
-  return createClient(env("SUPABASE_URL"), secretKey());
+  return createClient(env("SUPABASE_URL"), secretKey(), {
+    // Shared-instance convention: never public — pin the project schema.
+    db: { schema: "hearth" },
+  });
 }
 
 export function requireHouseholdToken(req: Request): string {
