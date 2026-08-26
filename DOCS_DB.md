@@ -186,6 +186,10 @@ GRANT SELECT ON hearth.households TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON hearth.profiles, hearth.todos,
       hearth.freezer_items, hearth.device_subscriptions TO anon, authenticated;
 -- household_tokens: NO grants
+
+-- service_role (server-side only, migration 0003): same verbs as anon on data
+-- tables + SELECT/INSERT/DELETE on household_tokens (no UPDATE — immutable);
+-- USAGE + EXECUTE on hearth_private helpers. BYPASSRLS by design.
 ```
 
 ## 5. Indexes
