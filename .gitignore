@@ -13,6 +13,7 @@ dist-ssr/
 
 # Supabase local development
 .supabase/
+supabase/.temp/
 
 # Logs
 *.log
