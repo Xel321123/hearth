@@ -33,15 +33,21 @@ insert into hearth.household_tokens (token_hash, household_id) values
 on conflict (token_hash) do nothing;
 
 -- ── profiles (alpha: 5 = the cap; beta: 2) ────────────────────────────────────
-insert into hearth.profiles (id, household_id, name) values
-  ('00000000-0000-0000-0000-000000000101', '00000000-0000-0000-0000-000000000001', 'Alex'),
-  ('00000000-0000-0000-0000-000000000102', '00000000-0000-0000-0000-000000000001', 'Sam'),
-  ('00000000-0000-0000-0000-000000000103', '00000000-0000-0000-0000-000000000001', 'Jamie'),
-  ('00000000-0000-0000-0000-000000000104', '00000000-0000-0000-0000-000000000001', 'Riley'),
-  ('00000000-0000-0000-0000-000000000105', '00000000-0000-0000-0000-000000000001', 'Casey'),
-  ('00000000-0000-0000-0000-000000000111', '00000000-0000-0000-0000-000000000002', 'Beta One'),
-  ('00000000-0000-0000-0000-000000000112', '00000000-0000-0000-0000-000000000002', 'Beta Two')
-on conflict (id) do nothing;
+-- WHERE NOT EXISTS instead of ON CONFLICT: the 5-profile BEFORE INSERT trigger
+-- fires BEFORE conflict resolution, so re-running an ON CONFLICT insert would
+-- raise 'profile limit reached' on a household already at the cap.
+insert into hearth.profiles (id, household_id, name)
+select v.id, v.household_id, v.name
+from (values
+  ('00000000-0000-0000-0000-000000000101'::uuid, '00000000-0000-0000-0000-000000000001'::uuid, 'Alex'),
+  ('00000000-0000-0000-0000-000000000102'::uuid, '00000000-0000-0000-0000-000000000001'::uuid, 'Sam'),
+  ('00000000-0000-0000-0000-000000000103'::uuid, '00000000-0000-0000-0000-000000000001'::uuid, 'Jamie'),
+  ('00000000-0000-0000-0000-000000000104'::uuid, '00000000-0000-0000-0000-000000000001'::uuid, 'Riley'),
+  ('00000000-0000-0000-0000-000000000105'::uuid, '00000000-0000-0000-0000-000000000001'::uuid, 'Casey'),
+  ('00000000-0000-0000-0000-000000000111'::uuid, '00000000-0000-0000-0000-000000000002'::uuid, 'Beta One'),
+  ('00000000-0000-0000-0000-000000000112'::uuid, '00000000-0000-0000-0000-000000000002'::uuid, 'Beta Two')
+) as v(id, household_id, name)
+where not exists (select 1 from hearth.profiles p where p.id = v.id);
 
 -- ── todos (alpha: 3 active + 1 completed) ─────────────────────────────────────
 insert into hearth.todos (id, household_id, profile_id, created_by, title, due_date, tags) values

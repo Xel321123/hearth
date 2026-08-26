@@ -54,6 +54,9 @@ before(async () => {
     await db.exec(read(`supabase/migrations/${m}`));
   }
   await db.exec(read("supabase/seed.sql"));
+  // Re-run: the seed must be idempotent (regression for the profile-cap
+  // trigger firing before ON CONFLICT resolution on re-runs).
+  await db.exec(read("supabase/seed.sql"));
 });
 
 after(async () => {
