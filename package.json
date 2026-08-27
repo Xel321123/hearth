@@ -15,7 +15,8 @@
     "test:client": "node --experimental-strip-types --test src/lib/*.test.ts",
     "test:db": "node --experimental-strip-types --test supabase/tests/rls_integration.test.ts",
     "e2e:client": "node --experimental-strip-types scripts/e2e-client.ts",
-    "e2e:ui": "node scripts/e2e-ui.mjs"
+    "e2e:ui": "node scripts/e2e-ui.mjs",
+    "e2e:live": "node scripts/e2e-live.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",
