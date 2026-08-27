@@ -68,7 +68,9 @@ SQL probe proves cross-household SELECT/UPDATE returns zero rows.
 
 **DoD (Phase 3):** airplane-mode on device: existing data readable, adds/edits queue,
 flush on reconnect; Lighthouse PWA audit ≥ 90.
-✅ **AUDITED 2026-08-26 (headless Chromium)**: `manifest.webmanifest` served with standalone display + 4 icons; service worker registered/active and page SW-controlled after reload; app icons 200; iOS banner renders. Full Lighthouse run requires the app on an HTTPS host (Phase 4 deploy).
+✅ **AUDITED 2026-08-27**: headless-Chromium e2e at the `/hearth/` subpath (18/18) +
+**Lighthouse 11 PWA category on the live site: 100/100** (installable-manifest,
+maskable-icon, splash-screen, themed-omnibox, content-width, viewport).
 
 ---
 
