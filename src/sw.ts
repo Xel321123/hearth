@@ -34,11 +34,13 @@ registerRoute(
 );
 
 // SPA navigation: network first, precached shell as offline fallback.
+// Paths resolve against the SW scope so this works at a Pages subpath too.
 registerRoute(({ request }) => request.mode === "navigate", async ({ request }) => {
   try {
     return await fetch(request);
   } catch {
-    const cached = await caches.match("/index.html");
+    const shellPath = new URL("index.html", self.registration.scope).pathname;
+    const cached = (await caches.match(shellPath)) ?? (await caches.match("/index.html"));
     if (cached) return cached;
     return new Response("Offline — reconnect to load Hearth.", { status: 503 });
   }
@@ -54,10 +56,12 @@ self.addEventListener("push", (event) => {
   }
   const title = typeof payload.title === "string" ? payload.title : "Hearth";
   const body = typeof payload.body === "string" ? payload.body : "Something needs your attention.";
+  // Resolve icons against the SW scope — works at a Pages subpath.
+  const icon = new URL("icons/icon-192.png", self.registration.scope).href;
   const options: NotificationOptions = {
     body,
-    icon: "/icons/icon-192.png",
-    badge: "/icons/icon-192.png",
+    icon,
+    badge: icon,
     data: payload.data ?? {},
   };
   event.waitUntil(self.registration.showNotification(title, options));
@@ -65,6 +69,7 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  const scope = self.registration.scope;
   event.waitUntil(
     self.clients
       .matchAll({ type: "window", includeUncontrolled: true })
@@ -72,11 +77,11 @@ self.addEventListener("notificationclick", (event) => {
         for (const win of windows) {
           if ("focus" in win) {
             win.focus();
-            win.navigate("/");
+            win.navigate(scope);
             return;
           }
         }
-        return self.clients.openWindow("/");
+        return self.clients.openWindow(scope);
       }),
   );
 });

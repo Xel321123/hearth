@@ -6,7 +6,7 @@
   "description": "Privacy-first PWA for shared households: todo list + freezer inventory. No accounts, no PII.",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/copy-404.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "check:functions": "tsc -p supabase/tsconfig.json",

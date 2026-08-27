@@ -97,7 +97,27 @@ client). `npm run test:client` for client-only, `npm run test:db` for DB only.
   `recipients=1`/`0`, cross-household isolation).
 - `npm run e2e:ui` — Playwright browser walkthrough + PWA audit (credentials
   reveal, persona switching, task assignment/filtering, search, history,
-  manifest, service worker registration/control, iOS install banner).
+  manifest, service worker registration/control, iOS install banner). Runs
+  against `vite preview` under the `/hearth/` subpath to match Pages.
+
+## Deploy — GitHub Pages
+
+The repo is public and Pages is wired to deploy `main` automatically
+(`.github/workflows/pages-deploy.yml`):
+
+**Live URL:** <https://xel321123.github.io/hearth/>
+
+- Vite `base` is `/hearth/` (subpath); the manifest uses relative
+  `start_url`/`scope`, and the service worker resolves its scope, icons and
+  navigation fallback from `self.registration.scope`.
+- `dist/404.html` (copied from `index.html` by `scripts/copy-404.mjs`) makes
+  Pages serve the app shell for unknown paths.
+- Client-safe env vars (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`,
+  `VITE_VAPID_PUBLIC_KEY`) are injected from repo **secrets** at build time —
+  never committed. Publishable keys only; the service role + VAPID private
+  keys remain Edge-Function secrets.
+- Push notifications work from the Pages origin (the push service doesn't
+  care about hosting); subscribe after the first install.
 
 ## Repository docs
 
@@ -121,6 +141,9 @@ client). `npm run test:client` for client-only, `npm run test:db` for DB only.
 **Steps 1–4 complete as of 2026-08-26.** The full stack is live: PostgreSQL
 schema + RLS on the shared Supabase instance, 7 deployed Edge Functions, and a
 mobile-first React PWA with offline service worker, iOS install banner, and
-targeted Web Push. Verified end-to-end (59/59 tests, 18/18 live client checks,
-18/18 browser checks). Remaining: notification settings, household wipe,
-static-host deploy + real-device push proof — see [`TASKS.md`](TASKS.md).
+targeted Web Push. **Evaluating it:** open <https://xel321123.github.io/hearth/>
+(public repo + GitHub Pages) — create a household, share the code+password
+with a second device, and watch tasks assigned to another profile ping that
+device. Verified end-to-end (59/59 tests, 18/18 live client checks, 18/18
+browser checks). Remaining: notification settings, household wipe, real-device
+push proof — see [`TASKS.md`](TASKS.md).

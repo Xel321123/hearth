@@ -80,7 +80,7 @@ flush on reconnect; Lighthouse PWA audit ≥ 90.
 - [x] Service worker: `push` → `showNotification` (icon/badge/data), `notificationclick` → focus/open app
 - [ ] Notification settings per device (e.g. mute assignment notifications)
 - [ ] Household delete/wipe + token revocation (backend: households are select-only by design today)
-- [ ] Deploy static build (HTTPS host) + verify SW registration + Lighthouse audit
+- [x] Deploy static build to HTTPS: **GitHub Pages live at https://xel321123.github.io/hearth/** — repo made public, Pages enabled (workflow source), `base: /hearth/`, relative manifest scope, SW scope-aware paths, `404.html` SPA fallback, env injected from repo secrets; SW registration + manifest + icons verified in-browser at the subpath (18/18 e2e:ui)
 - [x] End-to-end proof of targeting: **live-verified** — register a device for Profile B → `push-notify` to B reports `recipients=1`, to another profile `recipients=0` (client e2e, 18/18)
 - [ ] README final: screenshots, live URL, demo household
 

@@ -14,7 +14,9 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const BASE = "http://127.0.0.1:4173";
+// The app is built with base "/hearth/" (GitHub Pages subpath) — preview
+// serves it under that prefix, matching the deployed layout.
+const BASE = "http://127.0.0.1:4173/hearth/";
 const SHOTS = mkdtempSync(join(tmpdir(), "hearth-ui-"));
 const shot = (name) => `${SHOTS}/${name}.png`;
 
@@ -27,7 +29,9 @@ function check(name, ok, detail = "") {
 }
 
 // ── boot the preview server ─────────────────────────────────────────────
-const server = spawn("npx", ["vite", "preview", "--port", "4173", "--strictPort", "--host", "127.0.0.1"], {
+// Spawn the vite binary directly — killing an `npx` wrapper can orphan the
+// actual preview server on the port (strictPort then fails on re-runs).
+const server = spawn("node", ["node_modules/vite/bin/vite.js", "preview", "--port", "4173", "--strictPort", "--host", "127.0.0.1"], {
   cwd: process.cwd(),
   stdio: "ignore",
 });
@@ -147,23 +151,24 @@ try {
   // ── 7. PWA audit ──────────────────────────────────────────────────────
   await page.reload();
   const manifest = await page.evaluate(async () => {
-    const res = await fetch("/manifest.webmanifest");
+    // Relative URLs resolve against the Pages subpath (/hearth/).
+    const res = await fetch("manifest.webmanifest");
     const json = await res.json();
     const link = document.querySelector('link[rel="manifest"]');
     return { status: res.status, name: json.name, display: json.display, icons: json.icons.length, link: link?.getAttribute("href") ?? null };
   });
-  check("manifest.webmanifest served", manifest.status === 200 && manifest.link === "/manifest.webmanifest");
+  check("manifest.webmanifest served", manifest.status === 200 && typeof manifest.link === "string" && manifest.link.includes("/manifest.webmanifest"));
   check("manifest has name + standalone display + 4 icons", manifest.name === "Hearth" && manifest.display === "standalone" && manifest.icons === 4, JSON.stringify(manifest));
 
   const sw = await page.evaluate(async () => {
     const reg = await navigator.serviceWorker.ready;
     return { scope: reg.scope, active: Boolean(reg.active), controlled: Boolean(navigator.serviceWorker.controller) };
   });
-  check("service worker registered + active", sw.active && sw.scope.includes("4173"), JSON.stringify(sw));
+  check("service worker registered + active", sw.active && sw.scope.includes("/hearth/"), JSON.stringify(sw));
   check("page is SW-controlled after reload", sw.controlled === true);
 
   const icon = await page.evaluate(async () => {
-    const res = await fetch("/icons/icon-192.png");
+    const res = await fetch("icons/icon-192.png");
     return res.status;
   });
   check("app icon served (200)", icon === 200);
